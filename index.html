@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+    <style>
+      * {
+        margin: 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="view" style="width: 100vw; height: 100vh"></div>
+
+    <script type="module">
+      import SoonSpace from './dist/index.esm.js';
+      import FirstPersonControlsPlugin from './first-person-controls.esm.js';
+      import SoonmanagerSyncPlugin from './index.esm.js';
+      import { GUI } from './gui.js';
+      import { shimLight } from './shim.js';
+
+      const ssp = (window.ssp = new SoonSpace({
+        el: '#view',
+        options: {
+          // background:{},
+          showInfo: false,
+          showGrid: true,
+          controls: {
+            // panSpeed: 1,
+            zoomMinDistance: 0.01,
+          },
+        },
+        events: {
+          modelClick(param) {
+            console.log(param);
+          },
+          selectPosition(p) {
+            // console.log(p);
+          },
+        },
+      }));
+
+      // 灯光调整
+      const directionalLight = shimLight(ssp);
+
+      ssp.setSky({
+        rayleigh: 2,
+        elevation: 2,
+        exposure: 0.7,
+      });
+
+      ssp.setModelDracoDecoderPath('./dist/lib/draco/');
+
+      // bloom pass
+      ssp.setBloom({
+        threshold: 2,
+        strength: 1.5,
+        radius: 1,
+      });
+
+      const firstPersonControls = ssp.registerPlugin(
+        FirstPersonControlsPlugin,
+        'firstPersonControls'
+      );
+
+      const soonmanagerSync = (window.soonmanagerSync = ssp.registerPlugin(
+        SoonmanagerSyncPlugin,
+        'soonmanagerSync'
+      ));
+
+      soonmanagerSync.setBaseUrl('./tsp-merge4/');
+
+      const gui = new GUI();
+
+      // bloom
+      const bloomGui = gui.addFolder('Unreal Bloom');
+
+      bloomGui.open();
+
+      const bloomParams = {
+        strength: 1.5,
+        radius: 1,
+      };
+
+      const handleBloomChange = (value) => {
+        ssp.setBloom({ ...bloomParams, threshold: 2 });
+      };
+
+      handleBloomChange();
+
+      bloomGui
+        .add(bloomParams, 'strength', 0, 5, 0.01)
+        .name('泛光强度')
+        .onChange(handleBloomChange);
+
+      bloomGui
+        .add(bloomParams, 'radius', 0, 1, 0.01)
+        .name('泛光半径')
+        .onChange(handleBloomChange);
+
+      const loadloadScene = () => {
+        console.time('all');
+        console.time('main');
+
+        soonmanagerSync
+          .loadScene({
+            isIdleRest: true,
+            loadSceneAllSuccess() {
+              console.timeEnd('all');
+
+              ssp.updateAllShadow();
+
+              const guiParams = {
+                firstPersonControls: false,
+                ray: true,
+                rayPosition: {
+                  x: -6.6,
+                  y: 1.66,
+                  z: -9.2,
+                },
+                envMapPosition: {
+                  x: 1.4,
+                  y: 1.4,
+                  z: 1.66,
+                },
+                envMapSize: 58,
+                envMapIntensity: 0.31,
+                color: '#fcfcfc',
+                roughness: 0,
+                metalness: 0.4,
+                shadow: true,
+              };
+
+              // bloom
+              const allLights = ssp.getModelByName('BHY-0606/20');
+
+              const canvas3D = ssp.createCanvas3D({
+                id: 'test_canvas',
+                name: 'test_canvas',
+                position: {
+                  x: 0,
+                  y: 0,
+                  z: 0,
+                },
+                points: allLights.map((light, id) => ({
+                  id: 'point_' + id,
+                  name: 'point_' + id,
+                  radius: 0.06,
+                  position: {
+                    x: light.position.x,
+                    y: light.position.y,
+                    z: light.position.z,
+                  },
+                  color: '#fff',
+                })),
+              });
+
+              const allPoints = canvas3D.children;
+
+              allPoints.forEach((point) => {
+                const { material } = point;
+
+                material.color.multiplyScalar(4);
+                material.toneMapped = false;
+              });
+
+              // env map
+              const hall = ssp.getModelById(2146234866);
+              const hallMesh = hall.getObjectByName('对象007');
+
+              const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(2048, {
+                type: THREE.HalfFloatType,
+              });
+
+              const cubeCamera = new THREE.CubeCamera(
+                1,
+                1000,
+                cubeRenderTarget
+              );
+
+              hallMesh.material.envMap = cubeRenderTarget.texture;
+              hallMesh.material.color = new THREE.Color(guiParams.color);
+              hallMesh.material.roughness = guiParams.roughness;
+              hallMesh.material.metalness = guiParams.metalness;
+              hallMesh.material.needsUpdate = true;
+
+              const updateCubeCamera = () => {
+                cubeCamera.position.set(
+                  guiParams.rayPosition.x,
+                  guiParams.rayPosition.y,
+                  guiParams.rayPosition.z
+                );
+                cubeCamera.update(ssp.viewport.renderer, ssp.viewport.scene);
+                ssp.render();
+              };
+
+              updateCubeCamera();
+
+              const udpateFirstPerson = () => {
+                if (guiParams.firstPersonControls) {
+                  firstPersonControls.start({
+                    position: {
+                      x: 44,
+                      y: 7,
+                      z: -3,
+                    },
+                    rotation: { x: 0, y: Math.PI / 2, z: 0 },
+                    moveSpeed: 0.1,
+                    eyeHeight: 0.2,
+                    kneeHeight: 0.1,
+                    jumpHeight: 0.2,
+                    enableClash: false,
+                    enableGravity: false,
+                  });
+                } else {
+                  firstPersonControls.stop();
+                }
+              };
+
+              udpateFirstPerson();
+
+              gui
+                .add(guiParams, 'firstPersonControls')
+                .name('第一人称漫游')
+                .onChange(() => {
+                  udpateFirstPerson();
+                });
+
+              gui
+                .add(guiParams, 'ray')
+                .name('实时反射')
+                .onChange((value) => {
+                  if (value) {
+                    hallMesh.material.envMap = cubeRenderTarget.texture;
+                  } else {
+                    hallMesh.material.envMap = null;
+                  }
+
+                  ssp.render();
+                });
+
+              gui
+                .add(guiParams.rayPosition, 'x', -50, 50)
+                .name('反射源位置x')
+                .onChange(() => {
+                  updateCubeCamera();
+                });
+
+              gui
+                .add(guiParams.rayPosition, 'y', -50, 50)
+                .name('反射源位置y')
+                .onChange(() => {
+                  updateCubeCamera();
+                });
+
+              gui
+                .add(guiParams.rayPosition, 'z', -50, 50)
+                .name('反射源位置z')
+                .onChange(() => {
+                  updateCubeCamera();
+                });
+
+              gui
+                .add(guiParams, 'envMapIntensity', 0, 5)
+                .name('env强度')
+                .onChange(() => {
+                  hallMesh.material.envMapIntensity = guiParams.envMapIntensity;
+                  ssp.render();
+                });
+
+              gui
+                .addColor(guiParams, 'color')
+                .name('地面颜色')
+                .onChange((value) => {
+                  hallMesh.material.color = new THREE.Color(value);
+                  ssp.render();
+                });
+
+              gui
+                .add(guiParams, 'roughness', 0, 1, 0.1)
+                .name('地面粗糙度')
+                .onChange((value) => {
+                  hallMesh.material.roughness = value;
+                  ssp.render();
+                });
+
+              gui
+                .add(guiParams, 'metalness', 0, 1, 0.1)
+                .name('地面金属度')
+                .onChange((value) => {
+                  hallMesh.material.metalness = value;
+                  ssp.render();
+                });
+
+              gui
+                .add(guiParams, 'shadow')
+                .name('开启阴影')
+                .onChange((value) => {
+                  directionalLight.castShadow = value;
+
+                  ssp.render();
+                });
+            },
+          })
+          .then(() => {
+            console.timeEnd('main');
+          });
+      };
+
+      loadloadScene();
+    </script>
+  </body>
+</html>
